@@ -1,8 +1,24 @@
 import logging
 from datetime import datetime
 from pathlib import Path
+from typing import NamedTuple
+
+import pandas as pd
 
 logger = logging.getLogger(__name__)
+
+
+class PositionRecord(NamedTuple):
+    """
+    Represents a position record in an IGC file.
+    """
+
+    timestamp: datetime
+    latitude: float  # in degrees, north is positive, south is negative
+    longitude: float  # in degrees, east is positive, west is negative
+    av_flag: bool
+    pressure_altitude: float  # in meters
+    gps_altitude: float  # in meters
 
 
 class IGCParser:
@@ -17,12 +33,14 @@ class IGCParser:
     manufacturer_id: str = ""
     logger_id: str = ""
     additional_info: str = ""
+    position_records: list[PositionRecord]
 
     def __init__(self, file_path: str) -> None:
         self.file_path = Path(file_path)
 
         self._validate_file_path()
 
+        self.position_records = []
         self._parse()
 
     def _validate_file_path(self) -> None:
@@ -41,7 +59,7 @@ class IGCParser:
         for line in self.lines:
             line = line.strip()
             self._parse_record(line)
-        
+
     def _check_all_data_parsed(self) -> None:
         """
         Check if all expected data has been parsed.
@@ -59,7 +77,7 @@ class IGCParser:
             logger.warning("Logger ID not parsed.")
         if not self.additional_info:
             logger.warning("Additional info not parsed.")
-            
+
         logger.info("All expected data parsed successfully.")
 
     def _parse_record(self, line: str) -> None:
@@ -117,8 +135,85 @@ class IGCParser:
         Parse the position record in the following format:
         B160240 5407121N 00249342W A 00280 00421 205 09 950
 
-        Great, we've finally got to the log points we are interested in. The format is "B-timestamp-latitude-longitude-AVflag-pressure alt-GPS alt-extensions". As mentioned above, the first 35 bytes of the B record have a fixed definition, then after that the fields are determined by the I record. This B record has timestamp 16:02:40, lat 54 degrees 7.121 mins North, long 2 deg 49.342 mins West, AVflag (3D validity) A, 280m altitude from pressure sensor, 421m altitude from GPS, and FXA (accuracy) 205m, SIU (satellite count) 09 and ENL (engine noise) 950 (suggesting the engine is running...).
+        Great, we've finally got to the log points we are interested in. The format is "B-timestamp-latitude-longitude-AVflag-pressure alt-GPS alt-extensions".
+        As mentioned above, the first 35 bytes of the B record have a fixed definition, then after that the fields are determined by the I record. This B record
+        has timestamp 16:02:40, lat 54 degrees 7.121 mins North, long 2 deg 49.342 mins West, AVflag (3D validity) A, 280m altitude from pressure sensor,
+        421m altitude from GPS, and FXA (accuracy) 205m, SIU (satellite count) 09 and ENL (engine noise) 950 (suggesting the engine is running...).
+
+        e.g.
+
+        B
+        095532
+        4650345N
+        00824866E
+        A
+        00000
+        01909
         """
-        # This method can be expanded to parse position data as needed.
-        # For now, we will just log the position record.
-        logger.info(f"Position record: {line}")
+
+        if len(line) < 35:
+            raise ValueError(f"Position record line too short: {line}")
+
+        timestamp_str = line[1:7].strip()
+        latitude_str = line[7:15].strip()
+        longitude_str = line[15:24].strip()
+        av_flag_str = line[24:25].strip()
+        pressure_altitude_str = line[25:30].strip()
+        gps_altitude_str = line[30:35].strip()
+
+        # Parse timestamp
+        timestamp = datetime.strptime(timestamp_str, "%H%M%S")
+        timestamp = timestamp.replace(
+            year=self.flight_date.year,
+            month=self.flight_date.month,
+            day=self.flight_date.day,
+        )
+
+        # Parse latitude
+        latitude = float(latitude_str[:2]) + float(latitude_str[2:-1]) / 60.0
+        if latitude_str[-1] == "S":
+            latitude = -latitude
+
+        # Parse longitude
+        longitude = float(longitude_str[:3]) + float(longitude_str[3:-1]) / 60.0
+        if longitude_str[-1] == "W":
+            longitude = -longitude
+
+        # Parse AV flag
+        av_flag = av_flag_str == "A"
+
+        # Parse pressure altitude
+        pressure_altitude = float(pressure_altitude_str)
+
+        # Parse GPS altitude
+        gps_altitude = float(gps_altitude_str)
+
+        # Create a PositionRecord and add it to the list
+        position_record = PositionRecord(
+            timestamp=timestamp,
+            latitude=latitude,
+            longitude=longitude,
+            av_flag=av_flag,
+            pressure_altitude=pressure_altitude,
+            gps_altitude=gps_altitude,
+        )
+
+        self.position_records.append(position_record)
+
+    def to_pandas(self) -> pd.DataFrame:
+        """
+        Convert the parsed position records to a pandas DataFrame.
+        """
+
+        data = {
+            "timestamp": [record.timestamp for record in self.position_records],
+            "latitude": [record.latitude for record in self.position_records],
+            "longitude": [record.longitude for record in self.position_records],
+            "av_flag": [record.av_flag for record in self.position_records],
+            "pressure_altitude": [
+                record.pressure_altitude for record in self.position_records
+            ],
+            "gps_altitude": [record.gps_altitude for record in self.position_records],
+        }
+
+        return pd.DataFrame(data)
