@@ -1,7 +1,9 @@
-import rerun as rr
 import argparse
+import logging
 
-from .igc import IGCParser
+import rerun as rr
+
+from igc import IGCParser
 
 
 def main() -> None:
@@ -12,8 +14,9 @@ def main() -> None:
     parser = IGCParser(args.igc_path)
 
     # Initialize Rerun with the provided IGC file
-    rr.init("igc_visualizer", spawn=True)
+    # rr.init("igc_visualizer", spawn=True)
 
 
 if __name__ == "__main__":
+    logging.basicConfig(level=logging.INFO)
     main()

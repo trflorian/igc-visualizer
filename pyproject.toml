@@ -7,3 +7,8 @@ requires-python = ">=3.13"
 dependencies = [
     "rerun-sdk>=0.23.3",
 ]
+
+[dependency-groups]
+dev = [
+    "ruff>=0.11.13",
+]
